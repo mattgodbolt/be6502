@@ -54,7 +54,7 @@ bool verify(unsigned int from, const byte *compare, unsigned int size) {
     auto expected = pgm_read_byte_near(compare + i);
     if (b != expected) {
       char buf[128];
-      sprintf(buf, "\n!!! Mismatch at 0x%04x: %02x != %02x", addr, b, expected);
+      sprintf(buf, "\r\n!!! Mismatch at 0x%04x: %02x != %02x", addr, b, expected);
       Serial.println(buf);
       return false;
     }
@@ -145,12 +145,12 @@ void writeBlock(const byte *data, unsigned int offset, unsigned int size) {
       write64(i + sub + offset, data + i + sub);
       Serial.print(".");
     }
-    Serial.print("\n");
+    Serial.print("\r\n");
   }
 }
 
 void setup() {
-  Serial.begin(57600);
+  Serial.begin(115200);
   Serial.println("Hello!");
 
   for (auto pin = pinOffset + 1; pin <= pinOffset + 28; ++pin) {
@@ -163,18 +163,20 @@ void setup() {
   Serial.println("Writing...");
   writeBlock(out_rom1_bin, 0x0000, 0x4000);
   writeBlock(out_rom2_bin, 0x4000, 0x4000);
-  Serial.print("\n");
+  Serial.print("\r\n");
 
   Serial.print("Verifying...");
-  if (!verify(0x0000, out_rom1_bin, 0x4000))
+  if (!verify(0x0000, out_rom1_bin, 0x4000)
+      || !verify(0x4000, out_rom2_bin, 0x4000)) {
+    Serial.println("!FAIL!");
     return;
-  if (!verify(0x4000, out_rom2_bin, 0x4000))
-    return;
-  Serial.println("\nVerification OK!");
+  }
+  Serial.println("\r\nVerification OK!");
 
   Serial.println("Dumping...");
   read(0x0000, 0x0020);
   read(0x7f00, 0x8000);
+  Serial.println("!OK!");
 }
 
 

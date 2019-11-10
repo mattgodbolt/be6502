@@ -1,0 +1,11 @@
+expect {
+  "\n!OK!" goto yay
+  "\n!FAIL!" 
+   timeout 60
+}
+exit 1
+
+yay:
+print "Despite the make error below: ALL IS OK!!"
+! killall -QUIT  minicom
+exit 0
