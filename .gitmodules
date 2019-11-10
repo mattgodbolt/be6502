@@ -1,0 +1,3 @@
+[submodule "beebasm"]
+	path = beebasm
+	url = git@github.com:stardot/beebasm.git
