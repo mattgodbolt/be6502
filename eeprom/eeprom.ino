@@ -24,27 +24,52 @@ void setAddr(unsigned int addr) {
   }
 }
 
-void read(unsigned int from, unsigned int to) {
+void prepRead() {
   // All data in input mode
   for (auto pin_index = 0; pin_index < 8; ++pin_index) {
     pinMode(dataPin(pin_index), INPUT_PULLUP);
   }
-  Serial.println("Data pins input");
   // Write, output enable and chip select
   digitalWrite(notWe + pinOffset, HIGH);
   digitalWrite(notOe + pinOffset, LOW);
   digitalWrite(notCs + pinOffset, LOW);
-  Serial.println("Pins setup");
+}
+
+byte readByte() {
+  byte b = 0;
+  for (auto bit_idx = 0; bit_idx < 8; ++bit_idx) {
+    b |= digitalRead(dataPin(bit_idx)) == HIGH ? (1 << bit_idx) : 0;
+  }
+  return b;
+}
+
+bool verify(unsigned int from, const byte *compare, unsigned int size) {
+  prepRead();
+  for (unsigned int i = 0; i < size; ++i) {
+    if ((i & 0x3ff) == 0)
+    Serial.print(".");
+    auto addr = from + i;
+    setAddr(addr);
+    byte b = readByte();
+    auto expected = pgm_read_byte_near(compare + i);
+    if (b != expected) {
+      char buf[128];
+      sprintf(buf, "\n!!! Mismatch at 0x%04x: %02x != %02x", addr, b, expected);
+      Serial.println(buf);
+      return false;
+    }
+  }
+  return true;
+}
+
+void read(unsigned int from, unsigned int to) {
+  prepRead();
   char buf[128];
   for (auto addr = from; addr < to; addr += 16) {
     byte segment[16];
     for (auto offset = 0; offset < 16; ++offset) {
       setAddr(addr + offset);
-      byte b = 0;
-      for (auto bit_idx = 0; bit_idx < 8; ++bit_idx) {
-        b |= digitalRead(dataPin(bit_idx)) == HIGH ? (1 << bit_idx) : 0;
-      }
-      segment[offset] = b;
+      segment[offset] = readByte();
     }
     sprintf(buf, "%04x : %02x %02x %02x %02x %02x %02x %02x %02x    %02x %02x %02x %02x %02x %02x %02x %02x",
             addr,
@@ -74,13 +99,53 @@ void write(unsigned int addr, byte b) {
   delay(20);
 }
 
+inline void delayNs(int ns) {
+  constexpr int nanosPerClock = 1000000000 / (16 * 1000000);
+  constexpr int clocksPerIter = 3; // guess
+  constexpr int nsPerIter = clocksPerIter * nanosPerClock;
+  for (volatile int i = 0; i < ns; i += nsPerIter) {
+    // nothing
+  }
+}
+
 void write64(unsigned int addr, const byte *b64) {
   byte t64[64];
   for (int i = 0; i < 64; ++i) {
     t64[i] = pgm_read_byte_near(b64 + i);
   }
+
+  for (auto pin_index = 0; pin_index < 8; ++pin_index) {
+    pinMode(dataPin(pin_index), OUTPUT);
+  }
+  digitalWrite(notOe + pinOffset, HIGH);
+
   for (int i = 0; i < 64; ++i) {
-    write(addr + i, t64[i]);
+    auto b = t64[i];
+    setAddr(addr + i);
+    for (auto bit_idx = 0; bit_idx < 8; ++bit_idx) {
+      digitalWrite(dataPin(bit_idx), (b & (1 << bit_idx)) ? HIGH : LOW);
+    }
+    delayNs(50); // data setup
+    digitalWrite(notCs + pinOffset, LOW);
+    digitalWrite(notWe + pinOffset, LOW);
+    delayNs(100); // write pulse width
+    digitalWrite(notCs + pinOffset, HIGH);
+    digitalWrite(notWe + pinOffset, HIGH);
+  }
+  delay(10);
+}
+
+void writeBlock(const byte *data, unsigned int offset, unsigned int size) {
+  char buf[64];
+  constexpr auto blockSize = 1024;
+  for (unsigned int i = 0; i < size; i += blockSize) {
+    sprintf(buf, "%04x : ", i + offset);
+    Serial.print(buf);
+    for (int sub = 0; sub < blockSize; sub += 64) {
+      write64(i + sub + offset, data + i + sub);
+      Serial.print(".");
+    }
+    Serial.print("\n");
   }
 }
 
@@ -96,19 +161,20 @@ void setup() {
   Serial.println("Pins initialised");
 
   Serial.println("Writing...");
-  for (unsigned int i = 0; i < 256; i += 64) {
-    Serial.print(".");
-    write64(i, out_rom1_bin + i);
-  }
+  writeBlock(out_rom1_bin, 0x0000, 0x4000);
+  writeBlock(out_rom2_bin, 0x4000, 0x4000);
   Serial.print("\n");
-  for (unsigned int i = 16386-64; i < 16384; i += 64) {
-    Serial.print(".");
-    write64(i + 16384, out_rom2_bin + i);
-  }
 
-  Serial.println("Reading...");
-  read(0x0000, 0x0100);
-  read(0x7fe0, 0x8000);
+  Serial.print("Verifying...");
+  if (!verify(0x0000, out_rom1_bin, 0x4000))
+    return;
+  if (!verify(0x4000, out_rom2_bin, 0x4000))
+    return;
+  Serial.println("\nVerification OK!");
+
+  Serial.println("Dumping...");
+  read(0x0000, 0x0020);
+  read(0x7f00, 0x8000);
 }
 
 
