@@ -21,8 +21,14 @@ out/rom2.bin: out/rom.bin
 $(BEEBASM):
 	$(MAKE) -C beebasm/src code
 
-.PHONY: program
+.PHONY: program program_watch
+program_watch: program
+	minicom -D /dev/ttyACM0 -S minicom.script -b 57600
+
 program: out/rom1.h out/rom2.h
 	arduino --upload eeprom/eeprom.ino
-	minicom -D /dev/ttyACM0 -S minicom.script
 
+.PHONY: ice
+ice:
+	arduino --upload 6502ice/6502ice.ino
+	minicom -D /dev/ttyACM0 -b 57600

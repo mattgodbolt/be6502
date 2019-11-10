@@ -5,14 +5,22 @@ IRB = &6000
 ORG &8000
 
 .start
+
 LDA #&FF
 STA DDRB
+STA ORB
 
-.loop LDA #&55
+.topLoop
+LDA #&55
+CLC
+.loop
 STA ORB
-LDA #&AA
-STA ORB
+ROR A
 JMP loop
+
+FOR n, 0, 4096
+  EQUB <n
+NEXT
 
 SKIPTO &fffc
 .fffc EQUW &8000

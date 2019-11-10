@@ -10,6 +10,15 @@ constexpr byte notCs = 20;
 constexpr byte notOe = 22;
 constexpr byte notWe = 27;
 
+inline void delayNs(int ns) {
+  constexpr int nanosPerClock = 1000000000 / (16 * 1000000);
+  constexpr int clocksPerIter = 3; // guess
+  constexpr int nsPerIter = clocksPerIter * nanosPerClock;
+  for (volatile int i = 0; i < ns; i += nsPerIter) {
+    // nothing
+  }
+}
+
 byte dataPin(int bit_idx) {
   return dataPins[bit_idx] + pinOffset;
 }
@@ -27,7 +36,7 @@ void setAddr(unsigned int addr) {
 void prepRead() {
   // All data in input mode
   for (auto pin_index = 0; pin_index < 8; ++pin_index) {
-    pinMode(dataPin(pin_index), INPUT_PULLUP);
+    pinMode(dataPin(pin_index), INPUT);
   }
   // Write, output enable and chip select
   digitalWrite(notWe + pinOffset, HIGH);
@@ -45,21 +54,22 @@ byte readByte() {
 
 bool verify(unsigned int from, const byte *compare, unsigned int size) {
   prepRead();
+  int numFails = 0;
   for (unsigned int i = 0; i < size; ++i) {
     if ((i & 0x3ff) == 0)
-    Serial.print(".");
+      Serial.print(".");
     auto addr = from + i;
     setAddr(addr);
-    byte b = readByte();
+    auto b = readByte();
     auto expected = pgm_read_byte_near(compare + i);
     if (b != expected) {
       char buf[128];
-      sprintf(buf, "\r\n!!! Mismatch at 0x%04x: %02x != %02x", addr, b, expected);
+      sprintf(buf, "\r\n!!! Mismatch at 0x%04x: read %02x, expected %02x", addr, b, expected);
       Serial.println(buf);
-      return false;
+      if (++numFails == 10) break;
     }
   }
-  return true;
+  return numFails == 0;
 }
 
 void read(unsigned int from, unsigned int to) {
@@ -82,30 +92,53 @@ void read(unsigned int from, unsigned int to) {
   Serial.println("done");
 }
 
-void write(unsigned int addr, byte b) {
-  digitalWrite(notOe + pinOffset, HIGH);
-  setAddr(addr);
-  digitalWrite(notCs + pinOffset, LOW);
-  // All data in output mode
+void setWriteMode() {
   for (auto pin_index = 0; pin_index < 8; ++pin_index) {
     pinMode(dataPin(pin_index), OUTPUT);
   }
+  digitalWrite(notOe + pinOffset, HIGH);
+}
+
+void writeByte(byte b) {
   for (auto bit_idx = 0; bit_idx < 8; ++bit_idx) {
     digitalWrite(dataPin(bit_idx), (b & (1 << bit_idx)) ? HIGH : LOW);
   }
+}
+
+void writeToggle() {
+  delayNs(50); // data setup
+  digitalWrite(notCs + pinOffset, LOW);
   digitalWrite(notWe + pinOffset, LOW);
-  delayMicroseconds(1);
+  delayNs(100); // write pulse width
+  digitalWrite(notCs + pinOffset, HIGH);
   digitalWrite(notWe + pinOffset, HIGH);
+}
+
+void writeLL(unsigned int address, byte value) {
+  setAddr(address);
+  writeByte(value);
+  writeToggle();
+}
+
+void protect() {
+  Serial.println("Setting data protection");
+  setWriteMode();
+  writeLL(0x5555, 0xaa);
+  writeLL(0x2aaa, 0x55);
+  writeLL(0x5555, 0xa0);
   delay(20);
 }
 
-inline void delayNs(int ns) {
-  constexpr int nanosPerClock = 1000000000 / (16 * 1000000);
-  constexpr int clocksPerIter = 3; // guess
-  constexpr int nsPerIter = clocksPerIter * nanosPerClock;
-  for (volatile int i = 0; i < ns; i += nsPerIter) {
-    // nothing
-  }
+void unprotect() {
+  Serial.println("Removing data protection");
+  setWriteMode();
+  writeLL(0x5555, 0xaa);
+  writeLL(0x2aaa, 0x55);
+  writeLL(0x5555, 0x80);
+  writeLL(0x5555, 0xaa);
+  writeLL(0x2aaa, 0x55);
+  writeLL(0x5555, 0x20);
+  delay(20);
 }
 
 void write64(unsigned int addr, const byte *b64) {
@@ -114,25 +147,16 @@ void write64(unsigned int addr, const byte *b64) {
     t64[i] = pgm_read_byte_near(b64 + i);
   }
 
-  for (auto pin_index = 0; pin_index < 8; ++pin_index) {
-    pinMode(dataPin(pin_index), OUTPUT);
-  }
-  digitalWrite(notOe + pinOffset, HIGH);
+  setWriteMode();
 
   for (int i = 0; i < 64; ++i) {
-    auto b = t64[i];
     setAddr(addr + i);
-    for (auto bit_idx = 0; bit_idx < 8; ++bit_idx) {
-      digitalWrite(dataPin(bit_idx), (b & (1 << bit_idx)) ? HIGH : LOW);
-    }
-    delayNs(50); // data setup
-    digitalWrite(notCs + pinOffset, LOW);
-    digitalWrite(notWe + pinOffset, LOW);
-    delayNs(100); // write pulse width
-    digitalWrite(notCs + pinOffset, HIGH);
-    digitalWrite(notWe + pinOffset, HIGH);
+    writeByte(t64[i]);
+    writeToggle();
   }
-  delay(10);
+  prepRead();
+  while (readByte() != t64[63])
+    /*spin*/;
 }
 
 void writeBlock(const byte *data, unsigned int offset, unsigned int size) {
@@ -150,7 +174,7 @@ void writeBlock(const byte *data, unsigned int offset, unsigned int size) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(57600);
   Serial.println("Hello!");
 
   for (auto pin = pinOffset + 1; pin <= pinOffset + 28; ++pin) {
@@ -160,23 +184,41 @@ void setup() {
 
   Serial.println("Pins initialised");
 
-  Serial.println("Writing...");
-  writeBlock(out_rom1_bin, 0x0000, 0x4000);
-  writeBlock(out_rom2_bin, 0x4000, 0x4000);
-  Serial.print("\r\n");
+  constexpr auto doWrite = false;
+  if (doWrite) {
+    unprotect();
 
-  Serial.print("Verifying...");
-  if (!verify(0x0000, out_rom1_bin, 0x4000)
-      || !verify(0x4000, out_rom2_bin, 0x4000)) {
-    Serial.println("!FAIL!");
-    return;
+    Serial.println("Writing...");
+    writeBlock(out_rom1_bin, 0x0000, 0x0100);
+    //  writeBlock(out_rom1_bin, 0x0000, 0x4000);
+    //  writeBlock(out_rom2_bin, 0x4000, 0x4000);
+    //  Serial.print("\r\n");
+
+    protect();
   }
-  Serial.println("\r\nVerification OK!");
+  //  Serial.print("Verifying...");
+  auto ok = verify(0x0000, out_rom1_bin, 0x4000);
+  //            && verify(0x4000, out_rom2_bin, 0x4000);
+  //auto ok = false;
 
   Serial.println("Dumping...");
-  read(0x0000, 0x0020);
-  read(0x7f00, 0x8000);
-  Serial.println("!OK!");
+  //  for (int i = 0; i < 10; ++i)
+  read(0x0000, 0x0100);
+  read(0x10c0, 0x10d0);
+  read(0x7ff0, 0x8000);
+  if (ok) {
+    Serial.println("!OK!");
+  } else {
+    Serial.println("!FAIL!");
+  }
+
+  //  prepRead();
+  //  setAddr(0x1011);
+  //  for (int i = 0; i < 64; ++i) {
+  //      char buf[6];
+  //      sprintf(buf, "%02x", readByte());
+  //      Serial.println(buf);
+  //    }
 }
 
 

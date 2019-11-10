@@ -7,5 +7,5 @@ exit 1
 
 yay:
 print "Despite the make error below: ALL IS OK!!"
-! killall -QUIT  minicom
+! killall -9 minicom
 exit 0
