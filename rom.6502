@@ -1,0 +1,22 @@
+DDRB = &6002
+ORB = &6000
+IRB = &6000
+
+ORG &8000
+
+.start
+LDA #&FF
+STA DDRB
+
+.loop LDA #&55
+STA ORB
+LDA #&AA
+STA ORB
+JMP loop
+
+SKIPTO &fffc
+.fffc EQUW &8000
+.fffe EQUW &8000
+.end
+
+SAVE "", start, end
