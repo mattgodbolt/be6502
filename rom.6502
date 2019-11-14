@@ -11,12 +11,17 @@ STA DDRB
 STA ORB
 
 .topLoop
-LDA #&55
-CLC
-.loop
+LDA #&00
+SEC
+.loop1
+ROL A
 STA ORB
+BCC loop1
+.loop2
 ROR A
-JMP loop
+STA ORB
+BCC loop2
+JMP loop1
 
 FOR n, 0, 4096
   EQUB <n
