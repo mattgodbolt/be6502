@@ -20,24 +20,14 @@ lda #$ff ; temporarily put all the things on
 sta DDRA
 lda #1:sta ORA
 
-; Reset LCD
-lda #%00110000: jsr pokeLcdRegNoWait
-{ldy#4:.lp dey: bne lp}
-lda #%00110000: jsr pokeLcdRegNoWait
-{ldy#4:.lp dey: bne lp}
-lda #%00110000: jsr pokeLcdRegNoWait
-{ldy#4:.lp dey: bne lp}
 lda #%00110000: jsr pokeLcdReg ; 8-bit operation, 1-line, 5x8
+lda #%00000001: jsr pokeLcdReg ; clear display
 lda #%00001110: jsr pokeLcdReg ; display & cursor on
 lda #%00000110: jsr pokeLcdReg ; autoinc, no shift
-;lda #%01001000: jsr pokeLcd ; 'H'
-;lda #%01001001: jsr pokeLcd ; 'I'
 
-lda #<message : sta&70
-lda #>message : sta&71
 ldy #0
 .msgloop
-lda (&70),y: beq end
+lda message,y: beq end
 jsr pokeLcd
 iny:jmp msgloop
 .end jmp end
@@ -70,12 +60,11 @@ lda #0:sta DDRB
 ; assert RW to read
 {
   .loop
-  lda #2 OR LCD_RW_BIT OR LCD_E_BIT:sta ORA
-  lda #2 OR LCD_RW_BIT:sta ORA
-  lda ORB
-  bmi loop
+  lda #LCD_RW_BIT OR LCD_E_BIT:sta ORA
+  ldx ORB
+  lda #LCD_RW_BIT:sta ORA
+  txa:bmi loop
 }
-lda #4:sta ORA
 rts
 
 SKIPTO &fffc
