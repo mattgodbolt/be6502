@@ -9,46 +9,28 @@ LCD_E_BIT = &80
 LCD_RS_BIT = &20
 LCD_RW_BIT = &40
 
-tmp = &70
-
 ORG &8000
 
 .__start
 
-lda #0: sta AUX
 ; Configure DDRA
-lda #LCD_E_BIT OR LCD_RS_BIT OR LCD_RW_BIT:sta DDRA
+lda #0: sta AUX
+;LDA #LCD_E_BIT OR LCD_RS_BIT OR LCD_RW_BIT
+lda #$ff ; temporarily put all the things on
+sta DDRA
+lda #1:sta ORA
 
 lda #%00110000: jsr pokeLcdReg ; 8-bit operation, 1-line, 5x8
 lda #%00000001: jsr pokeLcdReg ; clear display
-lda #%00001110: jsr pokeLcdReg ; display & cursor on, no blink
+lda #%00001110: jsr pokeLcdReg ; display & cursor on
 lda #%00000110: jsr pokeLcdReg ; autoinc, no shift
 
 ldy #0
 .msgloop
-lda message,y: beq keybit
+lda message,y: beq end
 jsr pokeLcd
 iny:jmp msgloop
-
-.keybit
-lda #%00000111: jsr pokeLcdReg ; autoinc, shifty
-
-.waitForButton lda ORA:and #$1f:cmp #$1f:beq waitForButton
-sta tmp
-ror a: bcc fire
-ror a: bcc down
-ror a: bcc right
-ror a: bcc up
-ror a: bcc left
-jmp waitForButton
-.fire lda #'f' ; falls
-.print jsr pokeLcd
-.waitForRelease lda ORA:and #$1f:cmp #$1f:bne waitForRelease
-jmp waitForButton
-.up lda #'u': bcc print
-.down lda #'d': bcc print
-.left lda #'l': bcc print
-.right lda #'r': bcc print
+.end jmp end
 
 .message EQUS "Hello world": EQUB 0
 
@@ -69,7 +51,7 @@ pla ; falls through to...
 ldx #$ff:stx DDRB
 sta ORB
 lda #LCD_E_BIT:sta ORA
-lda #0:sta ORA
+lda #8:sta ORA
 rts
 
 .waitForLcd
