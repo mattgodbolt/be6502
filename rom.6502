@@ -1,56 +1,130 @@
+CPU 1 ; tasty phx/phy
+
 ORB = &6000
 ;ORA = &6001
 ORA = &600f
 DDRB = &6002
 DDRA = &6003
 AUX = &600b
+T1L = &6006
+T1H = &6007
 
 LCD_E_BIT = &80
 LCD_RS_BIT = &20
 LCD_RW_BIT = &40
 
-tmp = &70
+shipPos = &80
+moveCounter = &81
+stack = &100
+
+tunnelTop = &1000
+tunnelBottom = &1010
+
+randTab = &1100
+randPos = &10
 
 ORG &8000
 
 .__start
+ldx #$ff:txs
+stx T1L: stx T1H
+lda #%01000000: sta AUX ; continuous t1
 
-lda #0: sta AUX
 ; Configure DDRA
 lda #LCD_E_BIT OR LCD_RS_BIT OR LCD_RW_BIT:sta DDRA
 
-lda #%00110000: jsr pokeLcdReg ; 8-bit operation, 1-line, 5x8
+lda #%00111000: jsr pokeLcdReg ; 8-bit operation, 2-line, 5x8
 lda #%00000001: jsr pokeLcdReg ; clear display
-lda #%00001110: jsr pokeLcdReg ; display & cursor on, no blink
+lda #%00001100: jsr pokeLcdReg ; display on, cursor off, no blink
 lda #%00000110: jsr pokeLcdReg ; autoinc, no shift
 
+lda #%01000000: jsr pokeLcdReg ; set CGRAM address 0
+
+jsr initRand
+
+{
 ldy #0
-.msgloop
-lda message,y: beq keybit
-jsr pokeLcd
-iny:jmp msgloop
+.defloop
+lda gfxData, y: jsr pokeLcd
+iny: cpy #8:bne defloop
+}
 
-.keybit
-lda #%00000111: jsr pokeLcdReg ; autoinc, shifty
+lda #%10000000: jsr pokeLcdReg ; set DDRAM address 0
 
-.waitForButton lda ORA:and #$1f:cmp #$1f:beq waitForButton
-sta tmp
-ror a: bcc fire
+lda #0: sta shipPos
+{ ldx #15: .clrloop sta tunnelTop, x: sta tunnelBottom, x: dex: bpl clrloop }
+lda #$80:sta tunnelTop+1:sta tunnelBottom+3
+
+
+.mainloop
+lda ORA:and #$1f:cmp #$1f:beq nowt
+jsr handleButton
+.nowt
+jsr draw
+jsr move
+jsr delayForNextFrame
+jmp mainloop
+
+.delayForNextFrame
+{ ldy #8:.delayOut ldx #0:.delay dex: bne delay: dey: bne delayOut }
+rts
+
+.move
+LDX moveCounter:DEX:bmi actualMove
+stx moveCounter: rts
+
+.actualMove
+ldx #16:stx moveCounter
+{
+ldx #0: .lp:
+lda tunnelTop+1, X: sta tunnelTop, X
+lda tunnelBottom+1, X: sta tunnelBottom, X
+inx: cpx #15: bne lp
+}
+jsr rand:STA tunnelTop+15
+jsr rand:STA tunnelBottom+15
+rts
+
+.draw
+lda #%10000000: jsr pokeLcdReg ; set DDRAM address 0
+{
+ldx #0: .lp: lda tunnelTop, X: bpl skip: lda #$ff: jmp past
+.skip lda #32: .past
+jsr pokeLcdSave
+inx: cpx #16: bne lp
+}
+lda #%11000000: jsr pokeLcdReg ; set DDRAM address 64
+{
+ldx #0: .lp: lda tunnelBottom, X: bpl skip: lda #$ff: jmp past
+.skip lda #32: .past
+jsr pokeLcdSave
+inx: cpx #16: bne lp
+}
+; draw the ship at either 0 or 32
+{
+lda shipPos: beq skip: lda #64: .skip: ora #%10000000: jsr pokeLcdReg
+}
+lda #0: jsr pokeLcd ; our ship!
+rts
+
+
+.handleButton
+ror a: ;bcc fire
 ror a: bcc down
-ror a: bcc right
+ror a: ;bcc right
 ror a: bcc up
-ror a: bcc left
-jmp waitForButton
-.fire lda #'f' ; falls
-.print jsr pokeLcd
-.waitForRelease lda ORA:and #$1f:cmp #$1f:bne waitForRelease
-jmp waitForButton
-.up lda #'u': bcc print
-.down lda #'d': bcc print
-.left lda #'l': bcc print
-.right lda #'r': bcc print
+ror a: ;bcc left
+rts
+.down lda #1:sta shipPos:rts
+.up lda #0:sta shipPos:rts
 
-.message EQUS "Hello world": EQUB 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.pokeLcdSave ; poke A to lcd data. saves registers
+PHA:PHX
+jsr pokeLcd
+PLX:PLA: RTS
 
 .pokeLcd ; poke A to lcd data. splat A and X
 pha: jsr waitForLcd
@@ -84,6 +158,38 @@ lda #0:sta DDRB
   txa:bmi loop
 }
 rts
+
+.initRand
+LDA #0:STA randPos
+LDA #$23:STA randTab+0
+LDA #$fe:STA randTab+1
+LDA #$19:STA randTab+2
+LDA #$a0:STA randTab+3
+LDA #$7b:STA randTab+4
+LDA #$09:STA randTab+5
+rts
+
+.rand
+{
+phx
+ldx randPos
+dex: bpl skip: ldx #5:.skip
+stx randPos
+lda randTab, X: eor T1L:sta randTab,X
+plx
+rts
+}
+
+.gfxData:
+equb %00000000
+equb %00000000
+equb %00010000
+equb %00001111
+equb %00010000
+equb %00000000
+equb %00000000
+equb %00000000
+
 
 SKIPTO &fffc
 .fffc EQUW &8000

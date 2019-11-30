@@ -1,0 +1,93 @@
+ORB = &6000
+;ORA = &6001
+ORA = &600f
+DDRB = &6002
+DDRA = &6003
+AUX = &600b
+
+LCD_E_BIT = &80
+LCD_RS_BIT = &20
+LCD_RW_BIT = &40
+
+tmp = &70
+
+ORG &8000
+
+.__start
+
+lda #0: sta AUX
+; Configure DDRA
+lda #LCD_E_BIT OR LCD_RS_BIT OR LCD_RW_BIT:sta DDRA
+
+lda #%00110000: jsr pokeLcdReg ; 8-bit operation, 1-line, 5x8
+lda #%00000001: jsr pokeLcdReg ; clear display
+lda #%00001110: jsr pokeLcdReg ; display & cursor on, no blink
+lda #%00000110: jsr pokeLcdReg ; autoinc, no shift
+
+ldy #0
+.msgloop
+lda message,y: beq keybit
+jsr pokeLcd
+iny:jmp msgloop
+
+.keybit
+lda #%00000111: jsr pokeLcdReg ; autoinc, shifty
+
+.waitForButton lda ORA:and #$1f:cmp #$1f:beq waitForButton
+sta tmp
+ror a: bcc fire
+ror a: bcc down
+ror a: bcc right
+ror a: bcc up
+ror a: bcc left
+jmp waitForButton
+.fire lda #'f' ; falls
+.print jsr pokeLcd
+.waitForRelease lda ORA:and #$1f:cmp #$1f:bne waitForRelease
+jmp waitForButton
+.up lda #'u': bcc print
+.down lda #'d': bcc print
+.left lda #'l': bcc print
+.right lda #'r': bcc print
+
+.message EQUS "Hello world": EQUB 0
+
+.pokeLcd ; poke A to lcd data. splat A and X
+pha: jsr waitForLcd
+pla ; falls through to...
+.pokeLcdNoWait ; poke A to lcd data. splats A and X
+ldx #$ff:stx DDRB
+sta ORB
+lda #LCD_E_BIT or LCD_RS_BIT:sta ORA
+lda #0:sta ORA
+rts
+
+.pokeLcdReg ; poke A to lcd reg. splat A and X
+pha: jsr waitForLcd
+pla ; falls through to...
+.pokeLcdRegNoWait ; poke A to lcd reg. splats A and X
+ldx #$ff:stx DDRB
+sta ORB
+lda #LCD_E_BIT:sta ORA
+lda #0:sta ORA
+rts
+
+.waitForLcd
+; set up for reading from the chip
+lda #0:sta DDRB
+; assert RW to read
+{
+  .loop
+  lda #LCD_RW_BIT OR LCD_E_BIT:sta ORA
+  ldx ORB
+  lda #LCD_RW_BIT:sta ORA
+  txa:bmi loop
+}
+rts
+
+SKIPTO &fffc
+.fffc EQUW &8000
+.fffe EQUW &8000
+.__end
+
+SAVE "", __start, __end
